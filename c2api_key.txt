@@ -1,0 +1,5 @@
+{
+   Place your Collective2 Api Key here.
+}
+
+c2api_key = "PLACE_YOUR_C2_API_KEY_HERE";

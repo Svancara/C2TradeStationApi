@@ -1,0 +1,187 @@
+{
+
+  TradeStation to Collective2 API indicator. 
+
+  This indicator handles OrdersProvider Updated events and sends trading signals to Collective2 via Collective2 Signals API.
+  
+  2016-08-23: Just backbone of the indicator. 
+              - We need to use the "c2api_SendSignal" function in OrderChanged method here.
+              - Perhaps add also a position status to data sent to Collective2. It can help to track TradeStation account status more precisely.
+              - I have no idea if we need to do anything in OrderAdded and OrderRemoved.
+              - It would be helpfull, if we implement more specialized functions like C2SendBuy, C2SendSell, C2SendShort, C2SendCover, C2SendCancel.
+              - Currently, Collective2 does not have a function for "reverse". So if we are LONG and want to go SHORT, we need to send Sell at first.
+                This could be done on Collective2 side too if it will be better (less communication between TradeStation and Collective2). 
+                Perhaps Collective2 could develop also ClosePosition(Symbol) (CloseLongPosition(Symbol), CloseShortPosition(Symbol) ? ) if needed.
+              - This indicator should work in strategies and for manually sent orders too.                  
+}
+
+using elsystem ;
+using elsystem.collections ;
+using tsdata.common ;
+using tsdata.trading ;
+
+variables:
+  OrdersProvider OP(NULL), { OrdersProvider for Data1 }
+  string _ (""), // swallow function result
+  int iCount(0), // loop var
+  printDebug(true);
+
+
+{
+ ===========================================================================
+ ToDo: C2SendBuy - a function based on c2api_SendSignal.
+ (It should be a separate function.)
+ ===========================================================================
+  method string c2SendBuy begin
+ 
+ // c2api_SendSignal call example:
+ 
+ _ = c2api_SendSignal(c2api_key,
+                      C2SystemId,         // C2SystemId should be in the strategy code. 
+                      "TS_Order_Id_msft", // OrderId here
+                      Symbol of Data1,    // Is it OK?
+                      SecurityType.Stock,
+                      OrderType.Market,
+                      OrderAction.Buy,
+                      "2016-08-11 09:45:15", // Order entered when
+                      100,
+                      12.34,
+                      1.1,
+                      2.2,
+                      3.3,
+                      "DAY",
+                      "this is a comment");
+ 
+ end; 
+}
+
+// --------------------------------------------------------------------------
+// Debug helper
+// --------------------------------------------------------------------------
+method void debug(string txt) begin
+If (printDebug) then 
+  MessageLog("DEBUG: ", FormatTime("hh:mm:ss", ElTimeToDateTime( Time ) ),": ", txt);
+end;  
+
+// --------------------------------------------------------------------------
+// Debug helper
+// --------------------------------------------------------------------------
+Method void printOrder(tsdata.trading.Order order) begin
+  If (printDebug) then begin
+    print("Order details: ID = ",  order.OrderID);
+    print("               State = ",  order.StateToString(order.State));
+    print("               Type = ",  order.TypeToString(order.Type));
+    print("               Symbol = ",  order.Symbol);
+    print("               Action = ",  order.ActionToString(order.Action));
+    print("               EnteredQuantity = ",  order.EnteredQuantity);
+    print("               EnteredTime = ",  order.EnteredTime.ELFormatTime("hh:mm:ss"));
+    print("               Duration = ",  order.Duration);
+    print("               FilledQuantity = ",  order.FilledQuantity);
+    print("               FilledTime = ",  order.FilledTime.ELFormatTime("hh:mm:ss"));
+    print("               LeftQuantity = ",  order.LeftQuantity);
+    print("               Limit price = ",  order.LimitPrice);
+    // print("               Limit price style= ",  order.LimitPriceStyle.ToString());
+    print("               Lot size = ",  order.Lotsize);
+    print("               Stop price = ",  order.StopPrice);
+  end;  
+end;
+
+// --------------------------------------------------------------------------
+// Order added
+// --------------------------------------------------------------------------
+method void OrderAdded(tsdata.trading.Order order)
+begin
+  debug("Order added: " + order.OrderID + " " + order.Symbol);
+end;
+
+// --------------------------------------------------------------------------
+// Order removed
+// --------------------------------------------------------------------------
+method void OrderRemoved(tsdata.trading.Order order)
+begin
+  debug("Order removed: " + order.OrderID + " " + order.Symbol);
+end;
+
+// --------------------------------------------------------------------------
+// Order state changed
+// --------------------------------------------------------------------------
+method void OrderChanged(tsdata.trading.Order order)
+begin
+  debug("-- Order changed: ID = " + order.OrderID  ) ;
+  debug(" State: " + order.StateToString(order.State) + " OrderStateDetail = " + order.StateDetail.ToString()) ;
+  
+  // -----------------------------------------------------------------
+  // Send signals to Collective2 here: 
+  //        C2SendBuy(c2api_key, c2SystemId, order.OrderID, .... );
+  //        C2SendSell(c2api_key, c2SystemId, order.OrderID, .... );
+  //        ...
+  // -----------------------------------------------------------------
+  
+end;
+
+// --------------------------------------------------------------------------
+// OrdersProvider Updated event.
+// --------------------------------------------------------------------------
+method void OrdersProvider_Updated( Object sender, OrderUpdatedEventArgs args ) 
+Vars: string id, Order myOrder   ;
+begin
+
+  debug("OrdersProvider_Updated event");
+
+    If (args.Reason = OrderUpdateReason.InitialUpdate) then begin
+      debug("OrderUpdateReason.InitialUpdate");
+      If (args.Order <> null) then begin
+           debug("OrdersProvider_Updated : args.OrderID: " + args.OrderID + " args.Order.Symbol: " + args.Order.Symbol);
+      end else begin
+           debug("OrdersProvider_Updated: args.Order is NULL");  // api probably not fully intialized yet
+      end;
+    end
+    else begin
+    if strlen(args.OrderID) > 0 then
+    begin 
+        debug("OrdersProvider_Updated: Reason: " +  args.Reason.ToString());
+        debug("OrdersProvider_Updated: Message: " + args.Message);
+    
+      switch ( args.Reason )begin
+        // case OrderUpdateReason.InitialUpdate: debug("OrderUpdateReason.InitialUpdate"); break;
+        case OrderUpdateReason.added: OrderAdded( args.Order); break;
+        case OrderUpdateReason.removed: OrderRemoved(args.Order); break;
+        case OrderUpdateReason.statechanged:  OrderChanged( args.Order); break;
+        default: Messagelog("*** ERROR: Application error in OrdersProvider_Updated");
+      end;
+    end else begin
+      Messagelog("OrderID is EMPTY. You need to format the strategy and allow 'Automate execution'.");
+    end;
+  end;  
+end;
+
+
+once 
+  begin
+    OP = new OrdersProvider() ;
+    OP.Updated += OrdersProvider_Updated ;
+    OP.Realtime = true ;
+//    OP.States += "cancelpending, partiallyfilled, received, sending, sent, queued";
+    OP.States += "canceled, filled, partiallyfilled, sent, expired";
+
+    OP.Load = true ;
+
+    debug("=== c2api_v3 initialized ===");    
+    print("OP.Symbols.Count: ", OP.Symbols.Count);
+    print("OP.Accounts: ", OP.Accounts.Count);
+    print("OP.States: ", OP.States.Count);
+    print("OP.Load : ", OP.Load );
+    print("OP.Realtime: ", OP.Realtime);
+    print("OP.Count: ", OP.Count);
+    
+    // I am just curious if it works:
+    print("Orders:");
+    { check to see if an order exists for the current symbol and print some values }
+    For iCount = 0 to OP.Count-1 begin
+      print("Order ID:", OP[iCount].OrderID, " Status: ", OP[iCount].StateToString(OP[iCount].State));
+    end;
+    
+end;
+  
+  
+                                                                                               

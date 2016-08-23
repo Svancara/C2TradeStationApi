@@ -1,0 +1,24 @@
+{
+  This is a "repository" for C2TS API constants.
+}
+
+// Constants values. Do not change please!
+consts: 
+  string c2api_version("0.1"),
+  string c2api_apiId("TSAPI"),
+  string c2api_submitSignalUrl("https://api.collective2.com/world/apiv3/submitSignal");
+  ;
+
+// What field should this function return
+Inputs: whatToReturn(numeric);
+
+Variable: string result("");
+ 
+ switch (whatToReturn) begin
+ 	Case 1: result = c2api_version; break;
+ 	Case 2: result = c2api_apiId; break;
+ 	Case 100: result = c2api_submitSignalUrl; break;
+ 	default: result = "";
+ end;
+
+c2api_globals = result;

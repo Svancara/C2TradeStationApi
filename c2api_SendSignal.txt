@@ -1,0 +1,151 @@
+{
+	Send a signal to Collective2 Signal API.
+	
+	See https://collective2.com/api-signal-entry#toc-submitsignal
+	
+}
+
+using elsystem;
+using elsystem.collections;
+using elsystem.net;
+using tsdata.common;
+using tsdata.trading;
+
+
+Inputs:     apiKey(string),
+			systemId(NumericSimple),
+			orderId(string), 
+			ticker(string), 
+			typeOfSymbol(NumericSimple), 
+			typeOfOrder(NumericSimple), // OrderType enumeration
+			action(NumericSimple), // OrderAction enumeration
+			enteredTime(string),
+			enteredQuantity(NumericSimple),
+			limitPrice(NumericSimple),
+			stopPrice(NumericSimple),
+			profitTarget(NumericSimple),
+			stopLoss(NumericSimple),
+			duration(string),
+			comment(string);
+
+
+Variables:			
+			WebClient DataClient( NULL );
+
+// --------------------------------
+// OnUploadStringCompleted callback
+// --------------------------------
+method void OnUploadStringCompleted( Object Sender,  UploadStringCompletedEventArgs EventArgs)
+vars: 
+	string context,
+	string dataResults, 
+	Object json, 
+	Dictionary jsonDictionary, 
+	string c2_result;
+	
+begin
+	dataResults = EventArgs.Result;
+	context = EventArgs.UserState.ToString(); // order id for now. Perhaps Order object later.
+
+ 	print("--------- c2api_SendSignal DataResults ----------" );
+ 	print(dataResults);
+
+ 	json = DataClient.ParseJson(dataResults);
+ 	jsonDictionary = json astype Dictionary;
+ 	c2_result = jsonDictionary.Items["ok"] astype string;
+    
+    If (c2_result <> "1") then begin
+       jsonDictionary = jsonDictionary.Items["error"] astype Dictionary;
+       Messagelog("*** ERROR: Send order " + context);
+       Messagelog("*** Collective2 error: " + jsonDictionary.Items["title"] astype string + " | " + jsonDictionary.Items["message"] astype string);
+    end else begin
+       print("Collective2 Signal Id: ",jsonDictionary.Items["signalid"] astype string, ", elapsed time: ",jsonDictionary.Items["elapsed_time"] astype string);
+
+    end;
+end;
+
+// --------------------------------
+// createJsonPayload
+// --------------------------------
+method string createJsonPayload() 
+vars: string json, string actionString, string priceType, string profitTargetStr, string stopLossStr, string instrument;
+begin
+ 	actionString = "";
+ 	Switch (action) begin
+  		case OrderAction.Buy: actionString = "BTO"; break;
+  		case OrderAction.BuyToCover: actionString = "BTC";break;
+  		case OrderAction.Sell: actionString = "STC";break;
+  		case OrderAction.SellShort: actionString = "STO";break;
+  		default: 
+     		Print("***ERROR: Wrong order action: ",NumToStr(action,0)," OrderId: ",orderId);
+     		Messagelog("***ERROR: Wrong order action: ",NumToStr(action,0)," OrderId: ",orderId);
+ 	end;
+
+    // Price type
+    priceType = "";
+    Switch (typeOfOrder) begin 
+    	Case OrderType.Market: priceType = "'market':1"; break;
+    	Case OrderType.Limit: priceType = "'limit':" + NumToStr(limitPrice,6); break;
+    	Case OrderType.StopMarket: priceType = "'stop':"  + NumToStr(stopPrice,6); break;
+    	default: 
+     		Print("***ERROR: Wrong order type: ",NumToStr(typeOfOrder,0)," OrderId: ",orderId);
+     		Messagelog("***ERROR: Wrong order type: ",NumToStr(typeOfOrder,0)," OrderId: ",orderId);
+    end;
+
+    // ProfitTarget, StopLoss
+    profitTargetStr = "";
+    if profitTarget > 0.0 then profitTargetStr = "'profittarget':" + NumToStr(profitTarget,6) + ",";
+
+    stopLossStr = "";
+    if stopLoss > 0.0 then stopLossStr = "'stoploss':" + NumToStr(stopLoss,6) + ",";
+
+    // SecurityType 
+    instrument = "";
+    Switch (typeOfSymbol) begin 
+    	Case SecurityType.Forex: instrument = "'forex'"; break;
+    	Case SecurityType.Future: instrument = "'future'"; break;
+    	Case SecurityType.Stock: instrument = "'stock'"; break;
+    	Case SecurityType.StockOption: instrument = "'option'"; break;
+    	default: 
+     		Print("***ERROR: Wrong SecurityType: ",NumToStr(typeOfSymbol,0)," OrderId: ",orderId);
+     		Messagelog("***ERROR: Wrong SecurityType: ",NumToStr(typeOfSymbol,0)," OrderId: ",orderId);
+    end;
+ 
+	json = 
+        "{" + 
+        "'apikey':'" + apiKey + "'," +
+        "'systemid':" + NumToStr(systemid,0) + "," +
+        "'signal':" + 
+         	"{" +
+                   "'action':'" + actionString + "'," +
+                   "'quant':" + NumToStr(enteredQuantity,0) + "," +
+                   "'symbol':'" +  ticker + "',"  +
+                   "'typeofsymbol':" + instrument +  ","  +
+                   priceType + "," +
+                   profitTargetStr + 
+                   stopLossStr +                   
+                   "'duration':'" + duration +  "'," +
+                   "'comments':'" + comment +  "'," +
+                   "'tsorderid':'" + orderId +  "'," +
+                   "'sourcecode':'" + c2api_globals(2) +  "'," +
+                   "'sourceversion':'" + c2api_globals(1) +  "'" +
+            "}" +
+       "}";
+  print( json);
+
+  return json;
+End;
+
+ // Function body
+
+ print("Sending signal to Collective2: ", orderId);
+ DataClient = new WebClient ;
+ DataClient.UploadStringCompleted += OnUploadStringCompleted ;
+
+ DataClient.UploadStringAsync(Uri.Create(c2api_globals(100)),"POST",createJsonPayload(),orderId);
+
+ // This is async code. Returned value is not relevant. 
+ // A result of this function is known in OnUploadStringCompleted
+ c2api_SendSignal = "";
+ 
+ 
