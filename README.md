@@ -30,7 +30,7 @@ Currently used SMTP communication is error prone and we need a better solution.<
         c2api_SendSignal.txt
       </p>
       <p>
-        Implementation of Collective2 Api submitSignal function (<a href="https://api.collective2.com/world/apiv3/submitSignal">https://api.collective2.com/world/apiv3/submitSignal</a>)
+        Implementation of Collective2 Api submitSignal function (<a href="https://collective2.com/api-signal-entry#toc-submitsignal">https://collective2.com/api-signal-entry#toc-submitsignal</a>)
         in EasyLanguage.
       </p>
       </li>
