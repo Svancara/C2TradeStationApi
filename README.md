@@ -23,7 +23,7 @@ Currently used SMTP communication is error prone and we need a better solution.<
         c2api_key.txt
       </p>
       <p>
-        A one-line function holding user's Collective Api key. 
+        A one-line function holding user's Collective Api key. Enter your Collectiv2 API key here.
       </p>
       </li>
   <li><p>
