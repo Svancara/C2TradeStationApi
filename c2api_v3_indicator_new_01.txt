@@ -1,0 +1,338 @@
+using elsystem ;
+using elsystem.collections ;
+using tsdata.common ;
+using tsdata.trading ;
+using tsdata.marketdata;
+using elsystem.net;
+
+
+Inputs: int C2SystemId(0), int QuantityMultiplier(1.0);
+
+variables:
+    int C2StrategyId(0),
+    double _QuantityMultiplier(1.0),
+	OrdersProvider OP(NULL), { OrdersProvider for Data1 }
+	printDebug(true),
+	WebClient DataClient(NULL);
+
+{ ==========================================================
+ OnUploadStringCompleted callback
+ ========================================================== }
+method void OnUploadStringCompleted( Object Sender,  UploadStringCompletedEventArgs EventArgs)
+vars: 
+	string context,
+	string dataResults, 
+	Object json, 
+	Dictionary jsonDictionary, 
+	string c2_result;
+	
+begin
+	dataResults = EventArgs.Result;
+	context = EventArgs.UserState.ToString(); // order id for now. Perhaps Order object later.
+
+ 	print("--------- c2api_SendSignal DataResults ----------" );
+ 	print(dataResults);
+
+ 	json = DataClient.ParseJson(dataResults);
+ 	jsonDictionary = json astype Dictionary;
+ 	c2_result = jsonDictionary.Items["ok"] astype string;
+    
+    If (c2_result <> "1") then begin
+       jsonDictionary = jsonDictionary.Items["error"] astype Dictionary;
+       Messagelog("*** ERROR: Send order " + context);
+       Messagelog("*** Collective2 error: " + jsonDictionary.Items["title"] astype string + " | " + jsonDictionary.Items["message"] astype string);
+    end else begin
+       print("Collective2 Signal Id: ",jsonDictionary.Items["signalid"] astype string, ", elapsed time: ",jsonDictionary.Items["elapsed_time"] astype string);
+    end;
+end;
+
+
+{ ==========================================================
+ c2Signal - createJsonPayload
+ ========================================================== }
+method string createJsonPayload(tsdata.trading.Order tsOrder, SecurityType secType, string comment)
+vars: 
+		string json, 
+		string actionString, 
+		string priceType, 
+		string profitTargetStr, 
+		string stopLossStr,
+		string instrument; 
+begin
+ 	actionString = "";
+ 	Switch (tsOrder.Action) begin
+  		case OrderAction.Buy: actionString = "BTO"; break;
+  		case OrderAction.BuyToCover: actionString = "BTC";break;
+  		case OrderAction.Sell: actionString = "STC";break;
+  		case OrderAction.SellShort: actionString = "STO";break;
+  		default: 
+     		Print("***ERROR: Wrong order action: ",NumToStr(tsOrder.Action,0)," OrderId: ",tsOrder.OrderID);
+     		Messagelog("***ERROR: Wrong order action: ",NumToStr(tsOrder.Action,0)," OrderId: ",tsOrder.OrderID);
+ 	end;
+
+    // Price type
+    priceType = "";
+    Switch (tsOrder.Type) begin 
+    	Case OrderType.Market: priceType = "'market':1"; break;
+    	Case OrderType.Limit: priceType = "'limit':" + NumToStr(tsOrder.LimitPrice,6); break;
+    	Case OrderType.StopMarket: priceType = "'stop':"  + NumToStr(tsOrder.StopPrice,6); break;
+    	default: 
+     		Print("***ERROR: Wrong order type: ",NumToStr(tsOrder.Type,0)," OrderId: ",tsOrder.OrderID);
+     		Messagelog("***ERROR: Wrong order type: ",NumToStr(tsOrder.Type,0)," OrderId: ",tsOrder.OrderID);
+    end;
+
+    // ProfitTarget, StopLoss
+    profitTargetStr = "";
+    // if profitTarget > 0.0 then profitTargetStr = "'profittarget':" + NumToStr(profitTarget,6) + ",";
+
+    stopLossStr = "";
+    // if stopLoss > 0.0 then stopLossStr = "'stoploss':" + NumToStr(stopLoss,6) + ",";
+
+    // SecurityType 
+    instrument = "";
+    Switch (secType) begin 
+    	Case SecurityType.Forex: instrument = "'forex'"; break;
+    	Case SecurityType.Future: instrument = "'future'"; break;
+    	Case SecurityType.Stock: instrument = "'stock'"; break;
+    	Case SecurityType.StockOption: instrument = "'option'"; break;
+    	default: 
+     		Print("***ERROR: Wrong SecurityType: ",NumToStr(secType,0)," OrderId: ",tsOrder.OrderID);
+     		Messagelog("***ERROR: Wrong SecurityType: ",NumToStr(secType,0)," OrderId: ",tsOrder.OrderID);
+    end;
+ 
+	json = 
+        "{" + 
+        "'apikey':'" + c2api_key + "'," +
+        "'systemid':" + NumToStr(C2StrategyId,0) + "," +
+        "'signal':" + 
+         	"{" +
+                   "'action':'" + actionString + "'," +
+                   "'quant':" + NumToStr(tsOrder.EnteredQuantity * _QuantityMultiplier,0) + "," +
+                   "'symbol':'" + tsOrder.Symbol + "',"  +
+                   "'typeofsymbol':" + instrument +  ","  +
+                   priceType + "," +
+                   profitTargetStr + 
+                   stopLossStr +                   
+                   "'duration':'" + tsOrder.Duration +  "'," +
+                   "'comments':'" + comment +  "'," +
+                   "'tsorderid':'" + tsOrder.OrderID +  "'," +
+                   "'sourcecode':'" + c2api_globals(2) +  "'," +
+                   "'sourceversion':'" + c2api_globals(1) +  "'" +
+            "}" +
+       "}";
+  print( json);
+
+  return json;
+End;
+
+{ ====================================================================
+	Sends a signal to Collective2 Signal API.
+	
+	See https://collective2.com/api-signal-entry#toc-submitsignal
+	
+	My intention was to have this general purpose function as a separate EasyLanguage
+	function. But it seems it is not possible:
+    Error 1: Description: method arguments and local variables cannot be used as inputs in series functions due to their life time
+==================================================================== }
+method void c2Signal(tsdata.trading.Order tsOrder, SecurityType secType, string comment)  
+begin
+ print("Sending signal to Collective2: ", tsOrder.OrderID);
+ DataClient.UploadStringAsync(Uri.Create(c2api_globals(100)),"POST",createJsonPayload(tsOrder, secType, comment),tsOrder.OrderID);
+ // This is async code. Returned value is not relevant. 
+ // A result of this function is known in OnUploadStringCompleted
+end;
+
+// --------------------------------------------------------------------------
+// Debug helper
+// --------------------------------------------------------------------------
+method void debug(string txt) begin
+If (printDebug) then 
+	MessageLog("DEBUG: ", FormatTime("hh:mm:ss", ElTimeToDateTime( Time ) ),": ", txt);
+end;	
+
+{ --------------------------------------------------------------------------
+ Debug helper
+ -------------------------------------------------------------------------- }
+Method void printOrder(tsdata.trading.Order order) 
+vars: SymbolAttributesProvider SAP; 
+begin
+	If (printDebug) then begin
+   
+      if (order.State <> OrderState.Canceled) begin
+		debug("new SymbolAttributesProvider...");
+		SAP = new SymbolAttributesProvider(); 
+		debug("SAP.Symbol...");
+		SAP.Symbol = order.Symbol;
+		debug("SAP.Realtime...");
+		SAP.Realtime = true;
+		debug("SAP.Load...");
+		SAP.Load = true;
+		debug("SAP.Loaded");
+
+		print("Order details: ID = ",  order.OrderID);
+		print("               State = ",  order.StateToString(order.State));
+		print("               Type = ",  order.TypeToString(order.Type));
+		print("               Symbol = ",  order.Symbol);
+		print("               SymbolType = ",  SAP.Data.SymbolType.ToString());
+		print("               Action = ",  order.ActionToString(order.Action));
+		print("               EnteredQuantity = ",  order.EnteredQuantity);
+		print("               EnteredTime = ",  order.EnteredTime.ELFormatTime("hh:mm:ss"));
+		print("               Duration = ",  order.Duration);
+		print("               FilledQuantity = ",  order.FilledQuantity);
+		print("               FilledTime = ",  order.FilledTime.ELFormatTime("hh:mm:ss"));
+		print("               LeftQuantity = ",  order.LeftQuantity);
+		print("               Limit price = ",  order.LimitPrice);
+		// print("               Limit price style= ",  order.LimitPriceStyle.ToString());
+		print("               Lot size = ",  order.Lotsize);
+		print("               Stop price = ",  order.StopPrice);
+		
+		SAP.CloseProvider();
+		end;	
+	end;	
+end;
+
+{ --------------------------------------------------------------------------
+ Debug helper
+ -------------------------------------------------------------------------- }
+Method void printOrders() 
+var: int iCount;
+begin
+    print("Orders:");
+	{ check to see if an order exists for the current symbol and plot order values }
+	For iCount = 0 to OP.Count-1 begin
+	    printOrder(OP[iCount]);
+	    // print("Order ID:", OP[iCount].OrderID, " Status: ", OP[iCount].StateToString(OP[iCount].State));
+	end;
+end;
+
+// --------------------------------------------------------------------------
+// Order added
+// --------------------------------------------------------------------------
+method void OrderAdded(tsdata.trading.Order order)
+vars: SymbolAttributesProvider SAP; 
+begin
+	debug("Order added: " + order.OrderID + " " + order.Symbol);
+	
+	SAP = new SymbolAttributesProvider(); 
+	SAP.Symbol = order.Symbol;
+	SAP.Realtime = true;
+	SAP.Load = true;
+	
+	If (order.Action = OrderAction.Buy) then begin
+       handleBuy(order,SAP.Data.SymbolType);
+	end;
+	If (order.Action = OrderAction.Sell) then begin
+       handleSell(order,SAP.Data.SymbolType);
+	end;
+    
+    SAP.CloseProvider();
+end;
+
+// --------------------------------------------------------------------------
+// Order removed
+// --------------------------------------------------------------------------
+method void OrderRemoved(tsdata.trading.Order order)
+vars: SymbolAttributesProvider SAP; 
+begin
+	debug("Order removed: " + order.OrderID + " " + order.Symbol);
+	SAP = new SymbolAttributesProvider(); 
+	SAP.Symbol = order.Symbol;
+	SAP.Realtime = true;
+	SAP.Load = true;
+    SAP.CloseProvider();
+end;
+
+// --------------------------------------------------------------------------
+// Order state changed
+// --------------------------------------------------------------------------
+method void OrderChanged(tsdata.trading.Order order)
+begin
+	debug("-- Order changed: ID = " + order.OrderID  ) ;
+	debug(" State: " + order.StateToString(order.State) + " OrderStateDetail = " + order.StateDetail.ToString()) ;
+end;
+
+
+// Initiates a long position. Covers any short positions & reverses your position.
+method void handleBuy(tsdata.trading.Order order, SecurityType secType)
+begin
+	debug("handleBuy...") ;
+    c2Signal(order,secType,"Buy order added");
+end;
+
+    // Partially or completely liquidate a long position.
+method void handleSell(tsdata.trading.Order order, SecurityType secType)
+begin
+	debug("handleSell...") ;
+    c2Signal(order,secType,"Sell order added");
+end;
+
+
+// --------------------------------------------------------------------------
+// OrdersProvider Updated event.
+// --------------------------------------------------------------------------
+method void OrdersProvider_Updated( Object sender, OrderUpdatedEventArgs args ) 
+Vars: string id, Order myOrder   ;
+begin
+
+	debug("OrdersProvider_Updated event - start");
+
+    If (args.Reason = OrderUpdateReason.InitialUpdate) then begin
+      debug("OrderUpdateReason.InitialUpdate");
+      If (args.Order <> null) then begin
+           debug("OrdersProvider_Updated : args.OrderID: " + args.OrderID + " args.Order.Symbol: " + args.Order.Symbol);
+      end else begin
+           debug("OrdersProvider_Updated: args.Order is NULL. C2API indicator probably not fully intialized yet.");  
+      end;
+    end
+    else begin
+		if strlen(args.OrderID) > 0 then
+		begin	
+	    	debug("OrdersProvider_Updated: Reason: " +  args.Reason.ToString());
+	    	debug("OrdersProvider_Updated: Message: " + args.Message);
+		
+			switch ( args.Reason )begin
+				// case OrderUpdateReason.InitialUpdate: debug("OrderUpdateReason.InitialUpdate"); break;
+				case OrderUpdateReason.added: OrderAdded( args.Order); break;
+				case OrderUpdateReason.removed: OrderRemoved(args.Order); break;
+				case OrderUpdateReason.statechanged:  OrderChanged( args.Order); break;
+				default: Messagelog("*** ERROR: Application error in OrdersProvider_Updated");
+ 			end;
+		end else begin
+			Messagelog("OrderID is EMPTY. You need to format the strategy and allow 'Automate execution'.");
+		end;
+	end;	
+
+	debug("OrdersProvider_Updated event - end");
+end;
+
+	    
+
+once 
+	begin
+		// C2StrategyId = C2SystemId; this disables the whole indicator !!!!!!!!!!!
+		C2StrategyId = 30076808; // Bob Svan test system
+		// _QuantityMultiplier = QuantityMultiplier; this disables the whole indicator !!!!!!!!!!!
+		_QuantityMultiplier = 0.00001;
+		
+		OP = new OrdersProvider() ;
+	    OP.Updated += OrdersProvider_Updated;
+		OP.Realtime = true ;
+//		OP.States += "cancelpending, partiallyfilled, received, sending, sent, queued";
+		OP.States += "canceled, filled, partiallyfilled, sent, expired";
+		OP.Load = true ;
+		
+        DataClient = new WebClient ;
+        DataClient.UploadStringCompleted += OnUploadStringCompleted ;
+
+		debug("=== c2api_v3 initialized ===");		
+		print("OP.Symbols.Count: ", OP.Symbols.Count);
+		print("OP.Accounts: ", OP.Accounts.Count);
+		print("OP.States: ", OP.States.Count);
+		print("OP.Load : ", OP.Load );
+		print("OP.Realtime: ", OP.Realtime);
+		print("OP.Count: ", OP.Count);
+		printOrders();
+		
+end;
+	
+	
