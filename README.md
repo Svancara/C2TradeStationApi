@@ -44,3 +44,10 @@ Currently used SMTP communication is error prone and we need a better solution.<
   </li>
   
 </ul>
+
+<p>But it will not work. TradeStation does not allow inputs nad local varibles as arguments to separate functions. Huh!</p>
+
+<p>A new 'all in one' solution is in the file <i>c2api_v3_indicator_new_01.txt</i> .</p>
+
+<p>It partially works. But we need to test it if it is usable. Then - we need to add remaining functionality. </p>
+
